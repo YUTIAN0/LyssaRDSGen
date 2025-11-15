@@ -9,24 +9,34 @@ jobs:
   build:
     name: Build ${{ matrix.target }} - ${{ matrix.features }}
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    
     strategy:
       matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - x86_64-unknown-linux-gnu
+          - x86_64-pc-windows-gnu
+        features:
+          - cli
+          - gui
         include:
+          - target: x86_64-unknown-linux-gnu
+            features: cli
+            extension: ""
+          - target: x86_64-unknown-linux-gnu
+            features: gui
+            extension: "-gui"
           - target: x86_64-unknown-linux-musl
             features: cli
-            output-name: lyssa_rds_gen-linux-static
+            extension: ""
           - target: x86_64-unknown-linux-musl
             features: gui
-            output-name: lyssa_rds_gen-linux-gui-static
+            extension: "-gui"
           - target: x86_64-pc-windows-gnu
             features: cli
-            output-name: lyssa_rds_gen-windows-static.exe
+            extension: ".exe"
           - target: x86_64-pc-windows-gnu
             features: gui
-            output-name: lyssa_rds_gen-windows-gui-static.exe
+            extension: "-gui.exe"
     
     steps:
       - name: Checkout code
@@ -38,7 +48,11 @@ jobs:
       - name: Install required tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools mingw-w64
+          sudo apt-get install -y musl-tools mingw-w64 libgl1-mesa-dev libx11-dev
+          # 为 Linux GNU 安装 X11 开发库
+          if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
+            sudo apt-get install -y libgl1-mesa-dev libx11-dev
+          fi
 
       - name: Cache cargo dependencies
         uses: actions/cache@v4
@@ -49,7 +63,7 @@ jobs:
             cargo-${{ matrix.target }}-${{ matrix.features }}-
             cargo-${{ matrix.target }}-
             cargo-
-
+    
       - name: Setup Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -61,25 +75,22 @@ jobs:
         run: |
           mkdir -p dist
           cross build --target ${{ matrix.target }} --release ${{ matrix.features == 'gui' && '--features gui' || '' }}
-          # Handle platform-specific files
-          if [[ "${{ matrix.target }}" == "x86_64-pc-windows-gnu" ]]; then
-            cp target/${{ matrix.target }}/release/lyssa_rds_gen.exe dist/${{ matrix.output-name }}
+          
+          # 构建文件名
+          if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
+            cp target/${{ matrix.target }}/release/lyssa_rds_gen dist/lyssa_rds_gen-${{ matrix.target }}${{ matrix.extension }}
+          elif [[ "${{ matrix.target }}" == "x86_64-unknown-linux-musl" ]]; then
+            cp target/${{ matrix.target }}/release/lyssa_rds_gen dist/lyssa_rds_gen-${{ matrix.target }}${{ matrix.extension }}
           else
-            cp target/${{ matrix.target }}/release/lyssa_rds_gen dist/${{ matrix.output-name }}
+            cp target/${{ matrix.target }}/release/lyssa_rds_gen.exe dist/lyssa_rds_gen-${{ matrix.target }}${{ matrix.extension }}.exe
           fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rds-gen-${{ matrix.target }}-${{ matrix.features }}
-          path: dist/${{ matrix.output-name }}
-          retention-days: 1
-
-      - name: Extract version
-        id: version
-        run: |
-          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          name: build-${{ matrix.target }}-${{ matrix.features }}
+          path: dist/
+          if-no-files-found: error
 
   release:
     needs: build
@@ -87,7 +98,7 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     
     steps:
-      - name: Download artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
@@ -104,8 +115,15 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: v${{ steps.version.outputs.version }}
           name: LyssaRDSGen v${{ steps.version.outputs.version }}
+          body: |
+            # LyssaRDSGen v${{ steps.version.outputs.version }} Release
+            
+            ## Features
+            - Static builds for Linux (musl/gnu) and Windows
+            - CLI and GUI versions
+            - Built from commit ${{ github.sha }}
           files: |
-            dist/*.exe
-            dist/*.static
+            dist/lyssa_rds_gen-*.exe
+            dist/lyssa_rds_gen-*.static
           draft: false
           prerelease: false
