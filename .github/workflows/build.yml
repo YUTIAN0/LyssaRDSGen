@@ -9,6 +9,9 @@ jobs:
   build:
     name: Build ${{ matrix.target }} - ${{ matrix.features }}
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    
     strategy:
       matrix:
         include:
@@ -72,6 +75,12 @@ jobs:
           path: dist/${{ matrix.output-name }}
           retention-days: 1
 
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -93,8 +102,10 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          tag: v${{ needs.build.outputs.version }}
+          tag_name: v${{ steps.version.outputs.version }}
+          name: LyssaRDSGen v${{ steps.version.outputs.version }}
           files: |
             dist/*.exe
             dist/*.static
-
+          draft: false
+          prerelease: false
