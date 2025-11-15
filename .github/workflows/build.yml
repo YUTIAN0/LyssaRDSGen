@@ -17,21 +17,33 @@ jobs:
           # Linux GNU (动态链接)
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            build_features: true
-            build_default: true
+            build_features: true # 编译 gui_with_tui
+            build_tui: true      # 编译 tui_only
+            build_default: true  # 编译默认
             artifact_suffix: linux-gnu
+            binary_name_default: lyssa_rds_gen
+            binary_name_tui: lyssa_rds_gen_tui
+            binary_name_features: lyssa_rds_gen_gui # gui_with_tui
           # Linux Musl (静态链接)
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             build_features: true
+            build_tui: true
             build_default: true
             artifact_suffix: linux-musl
+            binary_name_default: lyssa_rds_gen
+            binary_name_tui: lyssa_rds_gen_tui
+            binary_name_features: lyssa_rds_gen_gui
           # Windows GNU
           - os: windows-latest
             target: x86_64-pc-windows-gnu
             build_features: true
+            build_tui: true
             build_default: true
             artifact_suffix: windows-gnu
+            binary_name_default: lyssa_rds_gen.exe
+            binary_name_tui: lyssa_rds_gen_tui.exe
+            binary_name_features: lyssa_rds_gen_gui.exe
 
     steps:
     - uses: actions/checkout@v4
@@ -47,17 +59,17 @@ jobs:
       with:
         targets: ${{ matrix.target }}
 
-    # 安装 MinGW-w64 工具链 (Windows GNU) - GitHub Actions 通常已预装
-    # - name: Install MinGW-w64 (Windows)
-    #   if: runner.os == 'Windows'
-    #   run: |
-    #     choco install mingw --no-progress
-
-    # 编译带有 "tui,gui" 特性的版本 (如果配置要求)
-    - name: Build with features (if enabled)
+    # 编译带有 "gui_with_tui" 特性的版本 (如果配置要求)
+    - name: Build with features (gui + tui) (if enabled)
       if: matrix.build_features
       run: |
-        cargo build --release --features "tui,gui" --target ${{ matrix.target }}
+        cargo build --release --features "gui_with_tui" --target ${{ matrix.target }}
+
+    # 编译带有 "tui_only" 特性的版本 (如果配置要求)
+    - name: Build with TUI only (if enabled)
+      if: matrix.build_tui
+      run: |
+        cargo build --release --features "tui_only" --target ${{ matrix.target }}
 
     # 编译默认特性版本 (如果配置要求)
     - name: Build default (if enabled)
@@ -65,31 +77,37 @@ jobs:
       run: |
         cargo build --release --target ${{ matrix.target }}
 
-    # 为每个成功的构建创建一个唯一的工件名称
-    - name: Upload build artifacts with features
+    # 上传构建产物
+    - name: Upload build artifacts with features (GUI + TUI)
       if: matrix.build_features
       uses: actions/upload-artifact@v4
       with:
-        name: build-${{ matrix.artifact_suffix }}-with-features
-        path: target/${{ matrix.target }}/release/
-        if-no-files-found: ignore
+        name: build-${{ matrix.artifact_suffix }}-with-features-gui-tui
+        path: target/${{ matrix.target }}/release/${{ matrix.binary_name_features }}
+        if-no-files-found: error
+
+    - name: Upload build artifacts with TUI only
+      if: matrix.build_tui
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-${{ matrix.artifact_suffix }}-with-tui-only
+        path: target/${{ matrix.target }}/release/${{ matrix.binary_name_tui }}
+        if-no-files-found: error
 
     - name: Upload build artifacts default
       if: matrix.build_default
       uses: actions/upload-artifact@v4
       with:
         name: build-${{ matrix.artifact_suffix }}-default
-        path: target/${{ matrix.target }}/release/
-        if-no-files-found: ignore
+        path: target/${{ matrix.target }}/release/${{ matrix.binary_name_default }}
+        if-no-files-found: error
 
-  # 新增的发布作业
   release:
-    needs: build # 确保发布作业在所有构建作业完成后运行
+    needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 需要写入权限来创建发布
+      contents: write
     steps:
-    # 检出代码
     - uses: actions/checkout@v4
 
     # 下载所有构建的工件
@@ -98,45 +116,32 @@ jobs:
       with:
         path: ./artifacts
 
-    # 列出下载的文件（调试用，可选）
-    - name: List artifacts
-      run: |
-        echo "Listing all downloaded artifacts:"
-        find ./artifacts -type f
-
-    # 准备发布内容并创建发布
+    # 创建发布并上传资产
     - name: Create Prerelease and Upload Assets
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub 自动提供此令牌
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        set -e # 遇到错误时退出
+        set -e
 
-        # 生成一个唯一的、可排序的标签用于连续构建
-        # 使用 YYYYMMDD-HHMMSS 格式的时间戳和 GitHub Actions 运行编号
         TIMESTAMP=$(date -u +"%Y%m%d-%H%M%S")
         RUN_NUMBER="${{ github.run_number }}"
         TAG_NAME="continuous-build-${TIMESTAMP}-${RUN_NUMBER}"
         RELEASE_NAME="Continuous Build $TAG_NAME"
 
-        echo "Generated tag: $TAG_NAME"
-        echo "Release name: $RELEASE_NAME"
-
-        # 创建一个预发布（Prerelease）
-        # --prerelease 标记使其成为预发布版本
+        # 创建预发布
         gh release create "$TAG_NAME" \
           --title "$RELEASE_NAME" \
           --draft=false \
           --prerelease=true \
           --notes "Automated build from commit ${{ github.sha }} on main branch."
 
-        # 遍历 artifacts 目录并上传每个文件
-        for file_path in ./artifacts/**/*; do
+        # 遍历所有下载的文件
+        for file_path in ./artifacts/*/*; do
           if [[ -f "$file_path" ]]; then
             filename=$(basename "$file_path")
-            # 为资产名称添加前缀以区分不同构建
-            asset_name="${TAG_NAME}-${filename}"
-            echo "Uploading $filename as $asset_name to release $TAG_NAME"
-            # 上传文件到指定的发布
+            artifact_name=$(basename "$(dirname "$file_path")")
+            asset_name="${TAG_NAME}-${artifact_name}-${filename}"
+            echo "Uploading $filename (from $artifact_name) as $asset_name"
             gh release upload "$TAG_NAME" "$file_path" --clobber
           fi
         done
