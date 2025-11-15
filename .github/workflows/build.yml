@@ -9,34 +9,18 @@ jobs:
   build:
     name: Build ${{ matrix.target }} - ${{ matrix.features }}
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    
     strategy:
       matrix:
         target:
-          - x86_64-unknown-linux-musl
           - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
           - x86_64-pc-windows-gnu
         features:
           - cli
           - gui
-        include:
-          - target: x86_64-unknown-linux-gnu
-            features: cli
-            extension: ""
-          - target: x86_64-unknown-linux-gnu
-            features: gui
-            extension: "-gui"
-          - target: x86_64-unknown-linux-musl
-            features: cli
-            extension: ""
-          - target: x86_64-unknown-linux-musl
-            features: gui
-            extension: "-gui"
-          - target: x86_64-pc-windows-gnu
-            features: cli
-            extension: ".exe"
-          - target: x86_64-pc-windows-gnu
-            features: gui
-            extension: "-gui.exe"
     
     steps:
       - name: Checkout code
@@ -78,16 +62,17 @@ jobs:
           mkdir -p dist
           cross build --target ${{ matrix.target }} --release ${{ matrix.features == 'gui' && '--features gui' || '' }}
           
+          # 生成平台特定文件名
           if [[ "${{ matrix.target }}" == "x86_64-pc-windows-gnu" ]]; then
-            cp target/${{ matrix.target }}/release/lyssa_rds_gen.exe dist/lyssa_rds_gen-${{ matrix.target }}${{ matrix.extension }}
+            cp target/${{ matrix.target }}/release/lyssa_rds_gen.exe dist/lyssa_rds_gen-${{ matrix.target }}-${{ matrix.features }}.exe
           else
-            cp target/${{ matrix.target }}/release/lyssa_rds_gen dist/lyssa_rds_gen-${{ matrix.target }}${{ matrix.extension }}
+            cp target/${{ matrix.target }}/release/lyssa_rds_gen dist/lyssa_rds_gen-${{ matrix.target }}-${{ matrix.features }}
           fi
 
-      - name: Upload artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: binaries-${{ matrix.target }}-${{ matrix.features }}
+          name: lyssa-rds-gen-${{ matrix.target }}-${{ matrix.features }}
           path: dist/
           if-no-files-found: error
 
@@ -101,16 +86,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download all artifacts
+        id: download
         uses: actions/download-artifact@v4
         with:
-          path: dist
-          name: |
-            binaries-x86_64-unknown-linux-musl-cli
-            binaries-x86_64-unknown-linux-musl-gui
-            binaries-x86_64-unknown-linux-gnu-cli
-            binaries-x86_64-unknown-linux-gnu-gui
-            binaries-x86_64-pc-windows-gnu-cli
-            binaries-x86_64-pc-windows-gnu-gui
+          path: dist/
+          download-jobs: true  # 自动下载所有jobs的工件
 
       - name: Extract version
         id: version
@@ -131,15 +111,21 @@ jobs:
             - Static builds for Linux (musl/gnu) and Windows
             - CLI and GUI versions
             
-            ## Build info
+            ## Build Info
             - Commit: ${{ github.sha }}
+            - Build time: $(date -u)
+            - Matrix targets:
+              - x86_64-unknown-linux-gnu
+              - x86_64-unknown-linux-musl
+              - x86_64-pc-windows-gnu
+            - Features:
+              - CLI
+              - GUI
+            
+            ## Files
+            ${{ fromJSON(steps.download.outputs.artifact-descriptor) | jq -r '.artifacts[].name' | sort | xargs -I{} echo "- {}" }}
           files: |
-            dist/lyssa_rds_gen-x86_64-unknown-linux-musl-cli
-            dist/lyssa_rds_gen-x86_64-unknown-linux-musl-gui
-            dist/lyssa_rds_gen-x86_64-unknown-linux-gnu-cli
-            dist/lyssa_rds_gen-x86_64-unknown-linux-gnu-gui
-            dist/lyssa_rds_gen-x86_64-pc-windows-gnu-cli.exe
-            dist/lyssa_rds_gen-x86_64-pc-windows-gnu-gui.exe
+            dist/lyssa_rds_gen-*.exe
+            dist/lyssa_rds_gen-*
           draft: false
           prerelease: false
-
