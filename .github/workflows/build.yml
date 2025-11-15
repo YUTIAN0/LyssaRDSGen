@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build Static Binaries (${{ matrix.target }})
+    name: Build ${{ matrix.target }} - ${{ matrix.features }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -17,6 +17,19 @@ jobs:
         features:
           - cli
           - gui
+        include:
+          - target: x86_64-unknown-linux-musl
+            features: cli
+            output-name: lyssa_rds_gen-linux-static
+          - target: x86_64-unknown-linux-musl
+            features: gui
+            output-name: lyssa_rds_gen-linux-gui-static
+          - target: x86_64-pc-windows-gnu
+            features: cli
+            output-name: lyssa_rds_gen-windows-static.exe
+          - target: x86_64-pc-windows-gnu
+            features: gui
+            output-name: lyssa_rds_gen-windows-gui-static.exe
     
     steps:
       - name: Checkout code
@@ -36,28 +49,16 @@ jobs:
           target: ${{ matrix.target }}
           toolchain: stable
           override: true
-          profile: default
-
-      - name: Cache cargo dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo
-          key: cargo-${{ matrix.target }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            cargo-${{ matrix.target }}-${{ matrix.features }}-
-            cargo-${{ matrix.target }}-
-            cargo-
 
       - name: Build ${{ matrix.target }} ${{ matrix.features }}
         run: |
           mkdir -p dist
           cross build --target ${{ matrix.target }} --release ${{ matrix.features == 'gui' && '--features gui' || '' }}
-          if [ -f "target/${{ matrix.target }}/release/lyssa_rds_gen${{ matrix.target == 'x86_64-pc-windows-gnu' ? '.exe' : '' }}" ]; then
-            cp target/${{ matrix.target }}/release/lyssa_rds_gen dist/lyssa_rds_gen-${{ matrix.target }}-${{ matrix.features }}${{ matrix.target == 'x86_64-pc-windows-gnu' ? '.exe' : '' }}
-            echo "Build successful: ${{ matrix.target }} ${{ matrix.features }}"
+          # Handle platform-specific extensions
+          if [[ "${{ matrix.target }}" == "x86_64-pc-windows-gnu" ]]; then
+            cp target/${{ matrix.target }}/release/lyssa_rds_gen.exe dist/${{ matrix.output-name }}
           else
-            echo "Build failed for ${{ matrix.target }} ${{ matrix.features }}"
-            exit 1
+            cp target/${{ matrix.target }}/release/lyssa_rds_gen dist/${{ matrix.output-name }}
           fi
 
       - name: Upload binaries
@@ -73,10 +74,9 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     
     steps:
-      - name: Gather artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v3
         with:
-          name: rds-gen
           path: dist
 
       - name: Create GitHub Release
