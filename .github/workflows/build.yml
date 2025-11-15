@@ -98,31 +98,14 @@ jobs:
           VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Generate release body
-        id: release_body
+      - name: Generate release metadata
+        id: metadata
         run: |
-          cat <<EOL > dist/release-body.md
-# LyssaRDSGen v${{ needs.build.outputs.version }} Release
-
-## Features
-- Static builds for Linux (musl/gnu) and Windows
-- CLI and GUI versions
-
-## Build Info
-- Commit: ${{ github.sha }}
-- Build time: $(date -u)
-- Matrix targets:
-  - x86_64-unknown-linux-gnu
-  - x86_64-unknown-linux-musl
-  - x86_64-pc-windows-gnu
-- Features:
-  - CLI
-  - GUI
-
-## Files
-$(find dist -type f -name "lyssa_rds_gen-*" | sort | xargs -I{} basename {})
-EOL
-          echo "release_body=$(cat dist/release-body.md)" >> $GITHUB_OUTPUT
+          # 生成文件列表
+          FILES=$(find dist -type f -name "lyssa_rds_gen-*" | sort | xargs -I{} basename {} | xargs -I{} echo "- {}" | tr -d '\n')
+          
+          # 生成版本信息
+          echo "release_files=$FILES" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -131,7 +114,25 @@ EOL
           tag_name: v${{ needs.build.outputs.version }}
           name: LyssaRDSGen v${{ needs.build.outputs.version }}
           body: |
-            ${{ steps.release_body.outputs.release_body }}
+            # LyssaRDSGen v${{ needs.build.outputs.version }} Release
+            
+            ## Features
+            - Static builds for Linux (musl/gnu) and Windows
+            - CLI and GUI versions
+            
+            ## Build Info
+            - Commit: ${{ github.sha }}
+            - Build time: $(date -u)
+            - Matrix targets:
+              - x86_64-unknown-linux-gnu
+              - x86_64-unknown-linux-musl
+              - x86_64-pc-windows-gnu
+            - Features:
+              - CLI
+              - GUI
+            
+            ## Files
+            ${{ steps.metadata.outputs.release_files }}
           files: |
             dist/lyssa_rds_gen-*.exe
             dist/lyssa_rds_gen-*
