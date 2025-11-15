@@ -1,146 +1,143 @@
-name: Rust Static Build & Release
+name: Build and Prerelease on Main Push
 
 on:
   push:
-    branches: ["main", "master"]
-  workflow_dispatch:
+    branches: [ "main" ] # 当推送到 main 分支时触发
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   build:
-    name: Build ${{ matrix.target }} - ${{ matrix.features }}
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        target:
-          - x86_64-unknown-linux-gnu
-          - x86_64-unknown-linux-musl
-          - x86_64-pc-windows-gnu
-        features:
-          - cli
-          - gui
+        include:
+          # Linux GNU (动态链接)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            build_features: true
+            build_default: true
+            artifact_suffix: linux-gnu
+          # Linux Musl (静态链接)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            build_features: true
+            build_default: true
+            artifact_suffix: linux-musl
+          # Windows GNU
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+            build_features: true
+            build_default: true
+            artifact_suffix: windows-gnu
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: Install cross
-        uses: taiki-e/install-action@cross
+    # 安装 musl-tools 以支持 musl 目标
+    - name: Install musl-tools (Linux)
+      if: matrix.target == 'x86_64-unknown-linux-musl'
+      run: sudo apt-get update && sudo apt-get install -y musl-tools
 
-      - name: Install required tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools mingw-w64 libgl1-mesa-dev libx11-dev
+    # 安装 Rust
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
 
-      - name: Extract version
-        id: version
-        run: |
-          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+    # 安装 MinGW-w64 工具链 (Windows GNU) - GitHub Actions 通常已预装
+    # - name: Install MinGW-w64 (Windows)
+    #   if: runner.os == 'Windows'
+    #   run: |
+    #     choco install mingw --no-progress
 
-      - name: Cache cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo
-          key: cargo-${{ matrix.target }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            cargo-${{ matrix.target }}-${{ matrix.features }}-
-            cargo-${{ matrix.target }}-
-            cargo-
-    
-      - name: Setup Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          target: ${{ matrix.target }}
-          toolchain: stable
-          override: true
+    # 编译带有 "tui,gui" 特性的版本 (如果配置要求)
+    - name: Build with features (if enabled)
+      if: matrix.build_features
+      run: |
+        cargo build --release --features "tui,gui" --target ${{ matrix.target }}
 
-      - name: Build ${{ matrix.target }} ${{ matrix.features }}
-        run: |
-          mkdir -p dist
-          cross build --target ${{ matrix.target }} --release ${{ matrix.features == 'gui' && '--features gui' || '' }}
-          
-          # 统一使用连字符命名（lyssa-rds-gen）
-          if [[ "${{ matrix.target }}" == "x86_64-pc-windows-gnu" ]]; then
-            cp target/${{ matrix.target }}/release/lyssa_rds_gen.exe dist/lyssa-rds-gen-${{ matrix.target }}-${{ matrix.features }}.exe
-          else
-            cp target/${{ matrix.target }}/release/lyssa_rds_gen dist/lyssa-rds-gen-${{ matrix.target }}-${{ matrix.features }}
-          fi
+    # 编译默认特性版本 (如果配置要求)
+    - name: Build default (if enabled)
+      if: matrix.build_default
+      run: |
+        cargo build --release --target ${{ matrix.target }}
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: lyssa-rds-gen-${{ matrix.target }}-${{ matrix.features }}
-          path: dist/
-          if-no-files-found: error
+    # 为每个成功的构建创建一个唯一的工件名称
+    - name: Upload build artifacts with features
+      if: matrix.build_features
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-${{ matrix.artifact_suffix }}-with-features
+        path: target/${{ matrix.target }}/release/
+        if-no-files-found: ignore
 
+    - name: Upload build artifacts default
+      if: matrix.build_default
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-${{ matrix.artifact_suffix }}-default
+        path: target/${{ matrix.target }}/release/
+        if-no-files-found: ignore
+
+  # 新增的发布作业
   release:
-    needs: build
+    needs: build # 确保发布作业在所有构建作业完成后运行
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    
+    permissions:
+      contents: write # 需要写入权限来创建发布
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    # 检出代码
+    - uses: actions/checkout@v4
 
-      - name: Download all artifacts
-        id: download
-        uses: actions/download-artifact@v4
-        with:
-          path: dist/
-          download-jobs: true
+    # 下载所有构建的工件
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
 
-      - name: Extract version
-        id: version
-        run: |
-          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+    # 列出下载的文件（调试用，可选）
+    - name: List artifacts
+      run: |
+        echo "Listing all downloaded artifacts:"
+        find ./artifacts -type f
 
-      - name: Generate release metadata
-        id: metadata
-        run: |
-          # 生成文件列表（使用修正后的文件名）
-          FILES=$(find dist -type f -name "lyssa-rds-gen-*" | sort | xargs -I{} basename {} | xargs -I{} echo "- {}" | tr -d '\n')
-          echo "release_files=$FILES" >> $GITHUB_OUTPUT
+    # 准备发布内容并创建发布
+    - name: Create Prerelease and Upload Assets
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub 自动提供此令牌
+      run: |
+        set -e # 遇到错误时退出
 
-      - name: Verify files exist
-        run: |
-          # 验证所有文件是否存在
-          if [[ "$(ls -1 dist/lyssa-rds-gen-* | wc -l)" -lt 6 ]]; then
-            echo "❌ Not all binaries found in dist directory"
-            exit 1
+        # 生成一个唯一的、可排序的标签用于连续构建
+        # 使用 YYYYMMDD-HHMMSS 格式的时间戳和 GitHub Actions 运行编号
+        TIMESTAMP=$(date -u +"%Y%m%d-%H%M%S")
+        RUN_NUMBER="${{ github.run_number }}"
+        TAG_NAME="continuous-build-${TIMESTAMP}-${RUN_NUMBER}"
+        RELEASE_NAME="Continuous Build $TAG_NAME"
+
+        echo "Generated tag: $TAG_NAME"
+        echo "Release name: $RELEASE_NAME"
+
+        # 创建一个预发布（Prerelease）
+        # --prerelease 标记使其成为预发布版本
+        gh release create "$TAG_NAME" \
+          --title "$RELEASE_NAME" \
+          --draft=false \
+          --prerelease=true \
+          --notes "Automated build from commit ${{ github.sha }} on main branch."
+
+        # 遍历 artifacts 目录并上传每个文件
+        for file_path in ./artifacts/**/*; do
+          if [[ -f "$file_path" ]]; then
+            filename=$(basename "$file_path")
+            # 为资产名称添加前缀以区分不同构建
+            asset_name="${TAG_NAME}-${filename}"
+            echo "Uploading $filename as $asset_name to release $TAG_NAME"
+            # 上传文件到指定的发布
+            gh release upload "$TAG_NAME" "$file_path" --clobber
           fi
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: v${{ needs.build.outputs.version }}
-          name: LyssaRDSGen v${{ needs.build.outputs.version }}
-          body: |
-            # LyssaRDSGen v${{ needs.build.outputs.version }} Release
-            
-            ## Features
-            - Static builds for Linux (musl/gnu) and Windows
-            - CLI and GUI versions
-            
-            ## Build Info
-            - Commit: ${{ github.sha }}
-            - Build time: $(date -u)
-            - Matrix targets:
-              - x86_64-unknown-linux-gnu
-              - x86_64-unknown-linux-musl
-              - x86_64-pc-windows-gnu
-            - Features:
-              - CLI
-              - GUI
-            
-            ## Files
-            ${{ steps.metadata.outputs.release_files }}
-          files: |
-            dist/lyssa-rds-gen-*.exe
-            dist/lyssa-rds-gen-*
-          draft: false
-          prerelease: false
+        done
+      shell: bash
