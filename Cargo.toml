@@ -19,7 +19,7 @@ rand = "0.8"
 eframe = { version = "0.27", default-features = false, features = ["default_fonts", "glow"], optional = true }
 egui = { version = "0.27", optional = true }
 
-# TUI (Terminal User Interface) - 默认可选
+# TUI (Terminal User Interface)
 crossterm = { version = "0.29.0", optional = true }
 ratatui = { version = "0.29.0", optional = true }
 
@@ -30,29 +30,9 @@ clap = { version = "4.5.51", features = ["derive"] }
 anyhow = "1.0"
 
 [features]
-default = [] # 保持默认为空，不自动启用 tui 或 gui
-# 定义组合特性，方便 CI 调用
-tui_only = ["crossterm", "ratatui"]
-gui_with_tui = ["eframe", "egui", "crossterm", "ratatui"]
-
-# [[bin]] 配置
-# 默认二进制文件 (无 tui, 无 gui)
-[[bin]]
-name = "lyssa_rds_gen"
-path = "src/main.rs"
-required-features = []
-
-# TUI 二进制文件 (启用 tui, 无 gui)
-[[bin]]
-name = "lyssa_rds_gen_tui"
-path = "src/main.rs"
-required-features = ["tui_only"]
-
-# GUI 二进制文件 (启用 gui 和 tui)
-[[bin]]
-name = "lyssa_rds_gen_gui"
-path = "src/main.rs"
-required-features = ["gui_with_tui"]
+default = []
+gui = ["eframe", "egui"]
+tui = ["crossterm", "ratatui"]
 
 [profile.release]
 opt-level = 3

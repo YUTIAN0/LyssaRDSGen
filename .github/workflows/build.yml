@@ -1,8 +1,8 @@
-name: Build and Prerelease on Main Push
+name: Build and Release
 
 on:
   push:
-    branches: [ "main" ] # 当推送到 main 分支时触发
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -14,93 +14,92 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux GNU (动态链接)
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            build_features: true # 编译 gui_with_tui
-            build_tui: true      # 编译 tui_only
-            build_default: true  # 编译默认
-            artifact_suffix: linux-gnu
-            binary_name_default: lyssa_rds_gen
-            binary_name_tui: lyssa_rds_gen_tui
-            binary_name_features: lyssa_rds_gen_gui # gui_with_tui
-          # Linux Musl (静态链接)
+          # Windows x64 with GUI
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            features: gui
+            artifact_name: lyssa_rds_gen-windows-x64-gui.exe
+          # Windows x64 with TUI
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            features: tui
+            artifact_name: lyssa_rds_gen-windows-x64-tui.exe
+          # Windows x64 with all features
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            features: "gui,tui"
+            artifact_name: lyssa_rds_gen-windows-x64-full.exe
+          # Linux x64 musl with GUI (static)
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            build_features: true
-            build_tui: true
-            build_default: true
-            artifact_suffix: linux-musl
-            binary_name_default: lyssa_rds_gen
-            binary_name_tui: lyssa_rds_gen_tui
-            binary_name_features: lyssa_rds_gen_gui
-          # Windows GNU
-          - os: windows-latest
-            target: x86_64-pc-windows-gnu
-            build_features: true
-            build_tui: true
-            build_default: true
-            artifact_suffix: windows-gnu
-            binary_name_default: lyssa_rds_gen.exe
-            binary_name_tui: lyssa_rds_gen_tui.exe
-            binary_name_features: lyssa_rds_gen_gui.exe
+            features: gui
+            artifact_name: lyssa_rds_gen-linux-x64-musl-gui
+          # Linux x64 musl with TUI (static)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            features: tui
+            artifact_name: lyssa_rds_gen-linux-x64-musl-tui
+          # Linux x64 musl with all features (static)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            features: "gui,tui"
+            artifact_name: lyssa_rds_gen-linux-x64-musl-full
+          # Linux x64 gnu with GUI
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            features: gui
+            artifact_name: lyssa_rds_gen-linux-x64-gnu-gui
+          # Linux x64 gnu with TUI
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            features: tui
+            artifact_name: lyssa_rds_gen-linux-x64-gnu-tui
+          # Linux x64 gnu with all features
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            features: "gui,tui"
+            artifact_name: lyssa_rds_gen-linux-x64-gnu-full
 
     steps:
     - uses: actions/checkout@v4
 
-    # 安装 musl-tools 以支持 musl 目标
-    - name: Install musl-tools (Linux)
-      if: matrix.target == 'x86_64-unknown-linux-musl'
-      run: sudo apt-get update && sudo apt-get install -y musl-tools
-
-    # 安装 Rust
-    - name: Install Rust
+    - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
       with:
         targets: ${{ matrix.target }}
 
-    # 编译带有 "gui_with_tui" 特性的版本 (如果配置要求)
-    - name: Build with features (gui + tui) (if enabled)
-      if: matrix.build_features
+    - name: Install musl-tools (Linux)
+      if: matrix.target == 'x86_64-unknown-linux-musl'
       run: |
-        cargo build --release --features "gui_with_tui" --target ${{ matrix.target }}
+        sudo apt-get update
+        sudo apt-get install -y musl-tools
 
-    # 编译带有 "tui_only" 特性的版本 (如果配置要求)
-    - name: Build with TUI only (if enabled)
-      if: matrix.build_tui
+    - name: Build for Windows
+      if: contains(matrix.os, 'windows')
       run: |
-        cargo build --release --features "tui_only" --target ${{ matrix.target }}
+        cargo build --target ${{ matrix.target }} --release --features "${{ matrix.features }}" --locked
 
-    # 编译默认特性版本 (如果配置要求)
-    - name: Build default (if enabled)
-      if: matrix.build_default
+    - name: Build for Linux
+      if: contains(matrix.os, 'ubuntu')
       run: |
-        cargo build --release --target ${{ matrix.target }}
+        cargo build --target ${{ matrix.target }} --release --features "${{ matrix.features }}" --locked
 
-    # 上传构建产物
-    - name: Upload build artifacts with features (GUI + TUI)
-      if: matrix.build_features
+    - name: Rename binary (Windows)
+      if: contains(matrix.os, 'windows')
+      run: |
+        Move-Item "target/${{ matrix.target }}/release/lyssa_rds_gen.exe" "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}"
+
+    - name: Rename binary (Linux)
+      if: contains(matrix.os, 'ubuntu')
+      run: |
+        mv "target/${{ matrix.target }}/release/lyssa_rds_gen" "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}"
+        chmod +x "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}"
+
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: build-${{ matrix.artifact_suffix }}-with-features-gui-tui
-        path: target/${{ matrix.target }}/release/${{ matrix.binary_name_features }}
-        if-no-files-found: error
-
-    - name: Upload build artifacts with TUI only
-      if: matrix.build_tui
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-${{ matrix.artifact_suffix }}-with-tui-only
-        path: target/${{ matrix.target }}/release/${{ matrix.binary_name_tui }}
-        if-no-files-found: error
-
-    - name: Upload build artifacts default
-      if: matrix.build_default
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-${{ matrix.artifact_suffix }}-default
-        path: target/${{ matrix.target }}/release/${{ matrix.binary_name_default }}
-        if-no-files-found: error
+        name: ${{ matrix.artifact_name }}
+        path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
   release:
     needs: build
@@ -108,41 +107,19 @@ jobs:
     permissions:
       contents: write
     steps:
-    - uses: actions/checkout@v4
-
-    # 下载所有构建的工件
     - name: Download all artifacts
       uses: actions/download-artifact@v4
+
+    - name: List downloaded files
+      run: find . -type f -executable -o -name "*.exe" | sort
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
       with:
-        path: ./artifacts
-
-    # 创建发布并上传资产
-    - name: Create Prerelease and Upload Assets
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        set -e
-
-        TIMESTAMP=$(date -u +"%Y%m%d-%H%M%S")
-        RUN_NUMBER="${{ github.run_number }}"
-        TAG_NAME="continuous-build-${TIMESTAMP}-${RUN_NUMBER}"
-        RELEASE_NAME="Continuous Build $TAG_NAME"
-
-        # 创建预发布
-        gh release create "$TAG_NAME" \
-          --title "$RELEASE_NAME" \
-          --draft=false \
-          --prerelease=true \
-          --notes "Automated build from commit ${{ github.sha }} on main branch."
-
-        # 遍历所有下载的文件
-        for file_path in ./artifacts/*/*; do
-          if [[ -f "$file_path" ]]; then
-            filename=$(basename "$file_path")
-            artifact_name=$(basename "$(dirname "$file_path")")
-            asset_name="${TAG_NAME}-${artifact_name}-${filename}"
-            echo "Uploading $filename (from $artifact_name) as $asset_name"
-            gh release upload "$TAG_NAME" "$file_path" --clobber
-          fi
-        done
-      shell: bash
+        tag_name: v${{ vars.CURRENT_VERSION || '1.0.0' }}
+        name: Release ${{ vars.CURRENT_VERSION || '1.0.0' }}
+        draft: false
+        prerelease: false
+        files: |
+          **/lyssa_rds_gen-*
+        generate_release_notes: true
