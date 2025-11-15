@@ -62,11 +62,11 @@ jobs:
           mkdir -p dist
           cross build --target ${{ matrix.target }} --release ${{ matrix.features == 'gui' && '--features gui' || '' }}
           
-          # 生成平台特定文件名
+          # 统一使用连字符命名（lyssa-rds-gen）
           if [[ "${{ matrix.target }}" == "x86_64-pc-windows-gnu" ]]; then
-            cp target/${{ matrix.target }}/release/lyssa_rds_gen.exe dist/lyssa_rds_gen-${{ matrix.target }}-${{ matrix.features }}.exe
+            cp target/${{ matrix.target }}/release/lyssa_rds_gen.exe dist/lyssa-rds-gen-${{ matrix.target }}-${{ matrix.features }}.exe
           else
-            cp target/${{ matrix.target }}/release/lyssa_rds_gen dist/lyssa_rds_gen-${{ matrix.target }}-${{ matrix.features }}
+            cp target/${{ matrix.target }}/release/lyssa_rds_gen dist/lyssa-rds-gen-${{ matrix.target }}-${{ matrix.features }}
           fi
 
       - name: Upload artifact
@@ -101,11 +101,17 @@ jobs:
       - name: Generate release metadata
         id: metadata
         run: |
-          # 生成文件列表
-          FILES=$(find dist -type f -name "lyssa_rds_gen-*" | sort | xargs -I{} basename {} | xargs -I{} echo "- {}" | tr -d '\n')
-          
-          # 生成版本信息
+          # 生成文件列表（使用修正后的文件名）
+          FILES=$(find dist -type f -name "lyssa-rds-gen-*" | sort | xargs -I{} basename {} | xargs -I{} echo "- {}" | tr -d '\n')
           echo "release_files=$FILES" >> $GITHUB_OUTPUT
+
+      - name: Verify files exist
+        run: |
+          # 验证所有文件是否存在
+          if [[ "$(ls -1 dist/lyssa-rds-gen-* | wc -l)" -lt 6 ]]; then
+            echo "❌ Not all binaries found in dist directory"
+            exit 1
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -134,7 +140,7 @@ jobs:
             ## Files
             ${{ steps.metadata.outputs.release_files }}
           files: |
-            dist/lyssa_rds_gen-*.exe
-            dist/lyssa_rds_gen-*
+            dist/lyssa-rds-gen-*.exe
+            dist/lyssa-rds-gen-*
           draft: false
           prerelease: false
