@@ -11,12 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target:
-          - x86_64-unknown-linux-musl
-          - x86_64-pc-windows-gnu
-        features:
-          - cli
-          - gui
         include:
           - target: x86_64-unknown-linux-musl
             features: cli
@@ -43,6 +37,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools mingw-w64
 
+      - name: Cache cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo
+          key: cargo-${{ matrix.target }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            cargo-${{ matrix.target }}-${{ matrix.features }}-
+            cargo-${{ matrix.target }}-
+            cargo-
+
       - name: Setup Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -54,19 +58,19 @@ jobs:
         run: |
           mkdir -p dist
           cross build --target ${{ matrix.target }} --release ${{ matrix.features == 'gui' && '--features gui' || '' }}
-          # Handle platform-specific extensions
+          # Handle platform-specific files
           if [[ "${{ matrix.target }}" == "x86_64-pc-windows-gnu" ]]; then
             cp target/${{ matrix.target }}/release/lyssa_rds_gen.exe dist/${{ matrix.output-name }}
           else
             cp target/${{ matrix.target }}/release/lyssa_rds_gen dist/${{ matrix.output-name }}
           fi
 
-      - name: Upload binaries
-        uses: actions/upload-artifact@v3
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
           name: rds-gen-${{ matrix.target }}-${{ matrix.features }}
-          path: dist/
-          if-no-files-found: error
+          path: dist/${{ matrix.output-name }}
+          retention-days: 1
 
   release:
     needs: build
@@ -75,15 +79,22 @@ jobs:
     
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: dist
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          tag: v${{ needs.build.outputs.version }}
           files: |
-            dist/lyssa_rds_gen-*.exe
-            dist/lyssa_rds_gen-*.static
+            dist/*.exe
+            dist/*.static
 
