@@ -9,6 +9,9 @@ jobs:
   build:
     name: Build ${{ matrix.target }} - ${{ matrix.features }}
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    
     strategy:
       matrix:
         target:
@@ -49,10 +52,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools mingw-w64 libgl1-mesa-dev libx11-dev
-          # 为 Linux GNU 安装 X11 开发库
-          if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
-            sudo apt-get install -y libgl1-mesa-dev libx11-dev
-          fi
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Cache cargo dependencies
         uses: actions/cache@v4
@@ -77,18 +82,16 @@ jobs:
           cross build --target ${{ matrix.target }} --release ${{ matrix.features == 'gui' && '--features gui' || '' }}
           
           # 构建文件名
-          if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-gnu" ]]; then
-            cp target/${{ matrix.target }}/release/lyssa_rds_gen dist/lyssa_rds_gen-${{ matrix.target }}${{ matrix.extension }}
-          elif [[ "${{ matrix.target }}" == "x86_64-unknown-linux-musl" ]]; then
-            cp target/${{ matrix.target }}/release/lyssa_rds_gen dist/lyssa_rds_gen-${{ matrix.target }}${{ matrix.extension }}
+          if [[ "${{ matrix.target }}" == "x86_64-pc-windows-gnu" ]]; then
+            cp target/${{ matrix.target }}/release/lyssa_rds_gen.exe dist/lyssa_rds_gen-${{ matrix.target }}${{ matrix.extension }}
           else
-            cp target/${{ matrix.target }}/release/lyssa_rds_gen.exe dist/lyssa_rds_gen-${{ matrix.target }}${{ matrix.extension }}.exe
+            cp target/${{ matrix.target }}/release/lyssa_rds_gen dist/lyssa_rds_gen-${{ matrix.target }}${{ matrix.extension }}
           fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: build-${{ matrix.target }}-${{ matrix.features }}
+          name: binaries
           path: dist/
           if-no-files-found: error
 
@@ -98,30 +101,31 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
+          name: binaries
           path: dist
-
-      - name: Extract version
-        id: version
-        run: |
-          VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: v${{ steps.version.outputs.version }}
-          name: LyssaRDSGen v${{ steps.version.outputs.version }}
+          tag_name: v${{ needs.build.outputs.version }}
+          name: LyssaRDSGen v${{ needs.build.outputs.version }}
           body: |
-            # LyssaRDSGen v${{ steps.version.outputs.version }} Release
+            # LyssaRDSGen v${{ needs.build.outputs.version }} Release
             
             ## Features
             - Static builds for Linux (musl/gnu) and Windows
             - CLI and GUI versions
-            - Built from commit ${{ github.sha }}
+            
+            ## Build info
+            - Commit: ${{ github.sha }}
+            - Build time: $(date -u)
           files: |
             dist/lyssa_rds_gen-*.exe
             dist/lyssa_rds_gen-*.static
