@@ -21,7 +21,7 @@ jobs:
         features:
           - cli
           - gui
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -90,13 +90,39 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist/
-          download-jobs: true  # 自动下载所有jobs的工件
+          download-jobs: true
 
       - name: Extract version
         id: version
         run: |
           VERSION=$(grep -m 1 '^version' Cargo.toml | cut -d '"' -f 2)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate release body
+        id: release_body
+        run: |
+          cat <<EOL > dist/release-body.md
+# LyssaRDSGen v${{ needs.build.outputs.version }} Release
+
+## Features
+- Static builds for Linux (musl/gnu) and Windows
+- CLI and GUI versions
+
+## Build Info
+- Commit: ${{ github.sha }}
+- Build time: $(date -u)
+- Matrix targets:
+  - x86_64-unknown-linux-gnu
+  - x86_64-unknown-linux-musl
+  - x86_64-pc-windows-gnu
+- Features:
+  - CLI
+  - GUI
+
+## Files
+$(find dist -type f -name "lyssa_rds_gen-*" | sort | xargs -I{} basename {})
+EOL
+          echo "release_body=$(cat dist/release-body.md)" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -105,25 +131,7 @@ jobs:
           tag_name: v${{ needs.build.outputs.version }}
           name: LyssaRDSGen v${{ needs.build.outputs.version }}
           body: |
-            # LyssaRDSGen v${{ needs.build.outputs.version }} Release
-            
-            ## Features
-            - Static builds for Linux (musl/gnu) and Windows
-            - CLI and GUI versions
-            
-            ## Build Info
-            - Commit: ${{ github.sha }}
-            - Build time: $(date -u)
-            - Matrix targets:
-              - x86_64-unknown-linux-gnu
-              - x86_64-unknown-linux-musl
-              - x86_64-pc-windows-gnu
-            - Features:
-              - CLI
-              - GUI
-            
-            ## Files
-            ${{ fromJSON(steps.download.outputs.artifact-descriptor) | jq -r '.artifacts[].name' | sort | xargs -I{} echo "- {}" }}
+            ${{ steps.release_body.outputs.release_body }}
           files: |
             dist/lyssa_rds_gen-*.exe
             dist/lyssa_rds_gen-*
