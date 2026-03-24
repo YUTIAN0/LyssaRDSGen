@@ -29,6 +29,7 @@ struct UiText {
     copy: &'static str,
     status: &'static str,
     input_params: &'static str,
+    open_licmgr: &'static str,
     error_pid_required: &'static str,
     error_spk_required: &'static str,
     error_count_range: &'static str,
@@ -62,6 +63,7 @@ impl UiText {
                 copy: "📋 Copy",
                 status: "Status",
                 input_params: "📝 Input Parameters",
+                open_licmgr: "Open License Manager",
                 error_pid_required: "Error: PID is required",
                 error_spk_required: "Error: SPK is required for validation",
                 error_count_range: "Error: Count must be between 1 and 9999",
@@ -91,6 +93,7 @@ impl UiText {
                 copy: "📋 复制",
                 status: "状态",
                 input_params: "📝 输入参数",
+                open_licmgr: "打开授权管理器",
                 error_pid_required: "错误：需要产品 ID",
                 error_spk_required: "错误：验证需要 SPK",
                 error_count_range: "错误：数量必须在 1 到 9999 之间",
@@ -433,6 +436,32 @@ impl eframe::App for LyssaRDSGenApp {
                                     );
                                 }
                             });
+
+                        ui.add_space(12.0);
+
+                        // Open License Manager button
+                        if ui
+                            .add_sized(
+                                [ui.available_width(), 36.0],
+                                egui::Button::new(
+                                    egui::RichText::new(text.open_licmgr)
+                                        .size(13.0)
+                                        .color(egui::Color32::from_rgb(71, 85, 105))
+                                )
+                                .fill(egui::Color32::from_rgb(241, 245, 249))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(209, 213, 219)))
+                                .rounding(egui::Rounding::same(8.0))
+                            )
+                            .clicked()
+                        {
+                            #[cfg(target_os = "windows")]
+                            {
+                                use std::process::Command;
+                                let _ = Command::new("cmd")
+                                    .args(["/c", "start", "", "licmgr.exe"])
+                                    .spawn();
+                            }
+                        }
                     });
 
                 ui.add_space(20.0);
