@@ -1,19 +1,6 @@
-import {
-    weierstrass
-} from 'curves/abstract/weierstrass';
-import {
-    Field
-} from 'curves/abstract/modular';
-import {
-    sha256
-} from 'hashes/sha256'
-import {
-    hmac
-} from 'hashes/hmac'
-import {
-    randomBytes
-} from 'hashes/utils'
-import { md5 } from 'js-md5'
+import { weierstrass } from 'curves/abstract/weierstrass.js'
+import { md5 } from 'hashes/legacy.js';
+import { concatBytes } from 'hashes/utils.js';
 
 const KCHARS = "BCDFGHJKMPQRTVWXY2346789";
 
@@ -148,8 +135,7 @@ async function sha1(data) {
 }
 
 async function md5Hash(data) {
-    const hashArray = md5.array(data);
-    return new Uint8Array(hashArray);
+    return md5(data);
 }
 
 function rc4(keyBytes, dataBytes) {
@@ -231,22 +217,6 @@ function mod(n, m) {
     return result >= 0n ? result : result + m;
 }
 
-function concatBytes(...arrays) {
-    const totalLength = arrays.reduce((acc, arr) => acc + arr.length, 0);
-    const result = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const arr of arrays) {
-        if (!(arr instanceof Uint8Array)) throw new TypeError("arguments must be Uint8Arrays");
-        result.set(arr, offset);
-        offset += arr.length;
-    }
-    return result;
-}
-
-const hmacSha256 = (key, ...msgs) => {
-    return hmac(sha256, key, concatBytes(...msgs));
-};
-
 function makeCurve(curveDef) {
     if (!curveDef || typeof curveDef !== 'object' ||
         typeof curveDef.p !== 'bigint' || typeof curveDef.n !== 'bigint' ||
@@ -256,22 +226,15 @@ function makeCurve(curveDef) {
         throw new Error("Incomplete/invalid curve definition");
     }
 
-    const Fp = Field(curveDef.p);
-
-    const curve = weierstrass({
+    const Point = weierstrass({
         a: curveDef.a,
         b: curveDef.b,
-        Fp: Fp,
+        p: curveDef.p,
         n: curveDef.n,
         Gx: curveDef.g.x,
         Gy: curveDef.g.y,
-        h: 1n,
-        hash: sha256,
-        hmac: hmacSha256,
-        randomBytes
+        h: 1n
     });
-
-    const Point = curve.ProjectivePoint;
 
     let G, K;
     try {
@@ -296,7 +259,7 @@ function makeCurve(curveDef) {
     }
 
     return {
-        E: curve.CURVE,
+        E: curveDef,
         G: G,
         K: K
     };
